@@ -1,4 +1,8 @@
-; findLabels.il -- 3.52
+; findLabels.il -- 3.53
+; CIW and popup show the search mode as mode=CURRENT or
+; mode=CURRENT TO BOTTOM: save lines and result lines of findSchLay() and
+; findLaySch(), and the first line of the summary window.
+; 3.52:
 ; Smaller marks: donut outer radius 0.8 (inner 0.4); candidate box + X
 ; half size 0.4 (flCandidateHalf, a quarter of before). Block outline
 ; boxes are unchanged.
@@ -152,7 +156,7 @@ unless(boundp('flSummaryOpen) flSummaryOpen=nil)
 ; Block cells (schematic made of sub-cells), cached per load.
 flBlockCellCache=makeTable('flBlockCellCache nil)
 
-flVersion="3.52"
+flVersion="3.53"
 flBottomMode=nil
 flSchTargets=nil
 flLayTargets=nil
@@ -792,7 +796,7 @@ procedure(flCaptureSch(cv)
 
         when(flSchTargets
             printf(
-                "[S2L] %s: saved %s\n"
+                "[S2L] mode=%s; saved %s\n"
                 flModeName()
                 flNameListText(mapcar('cadr flSchTargets))
             )
@@ -856,7 +860,7 @@ procedure(flCaptureLay()
 
         if(flLayTargets || flLayCellTargets then
             printf(
-                "[L2S] %s: saved %s\n"
+                "[L2S] mode=%s; saved %s\n"
                 flModeName()
                 flNameListText(
                     append(
@@ -5578,7 +5582,7 @@ procedure(flFinishReport(direction)
             printf("%s\n" summary)
         else
             printf(
-                "[%s] %s: %s%s%s%s\n"
+                "[%s] mode=%s; %s%s%s%s\n"
                 if(direction=='S2L then "S2L" else "L2S")
                 flModeName()
                 if(flSelLabelCount>0 then
@@ -5680,7 +5684,7 @@ procedure(flFinishReport(direction)
 
         when(flShowWarningPopup && shown
             ; Short: mode and result, then the messages without their tags.
-            text=sprintf(nil "%s: %s\n\n"
+            text=sprintf(nil "mode=%s; %s\n\n"
                 flModeName()
                 if(flMatches>0 then
                     sprintf(nil "%d mark%s" flMatches if(flMatches==1 then "" else "s"))
