@@ -1,4 +1,37 @@
-; findLabels.il -- 3.53
+; findLabels.il -- 3.56
+; CURRENT keeps the net connection guide at this level only: instances
+; placed directly in the edit cell. Pins of cells inside a bundle
+; (sramcell in sramcellx2) and endpoints whose instance-name label is in a
+; lower cell are not marked; the CIW says to use CURRENT TO BOTTOM.
+; CURRENT TO BOTTOM is unchanged.
+; S2L: pass-through cells (netcon, wire_ models) are no longer endpoints;
+; they have no layout (no "use CURRENT TO BOTTOM" note for them).
+; 3.55:
+; An endpoint on a cell made of devices only (no sub-cell schematics, e.g.
+; sramcell) is no longer dropped when its layout is not entered: it stays
+; at its level and its pin is found by cell name (both modes).
+; CURRENT: a block placed directly in the edit cell whose layout has the
+; pin label at its top level is marked there too (flCurrentBlockPins);
+; other blocks are skipped with "use CURRENT TO BOTTOM" as before.
+; CURRENT TO BOTTOM: an endpoint with no instance-name label whose cell is
+; not placed in the cell chosen by labels (e.g. sramx16_unit1, which holds
+; only the P2 and P0q labels) is looked up by cell name in the layout of
+; the saved schematic cell around it (a_sramx16).
+; 3.54:
+; Pin labels are read on every text layer whose name ends with TXT
+; (M2TXT, M3TXT, TMTXT, ...), not only ITXT and M1TXT
+; (flTerminalLabelSuffix). Instance-name labels are unchanged.
+; Endpoint with no instance-name label, marked by cell name: placements in
+; mosaics and units inside a bundle count too, and a bundle may be named
+; <cell>x<N> (sramcellx2) as well as <cell>_x<N>. With several placements
+; the pins are marked only when every schematic instance of that cell in
+; the block is on this net with this pin and the counts match (e.g. 16
+; sramcell on a bit line); otherwise nothing is marked and one CIW line
+; gives the counts. The CIW also says why an endpoint was not marked
+; (cell not placed here, pin label not found).
+; L2S: every cell whose name starts with wire_ is a pass-through cell
+; (flNetconPrefixes): N1 <-> N2 when it has them, else its two terminals.
+; 3.53:
 ; CIW and popup show the search mode as mode=CURRENT or
 ; mode=CURRENT TO BOTTOM: save lines and result lines of findSchLay() and
 ; findLaySch(), and the first line of the summary window.
@@ -156,7 +189,7 @@ unless(boundp('flSummaryOpen) flSummaryOpen=nil)
 ; Block cells (schematic made of sub-cells), cached per load.
 flBlockCellCache=makeTable('flBlockCellCache nil)
 
-flVersion="3.53"
+flVersion="3.56"
 flBottomMode=nil
 flSchTargets=nil
 flLayTargets=nil
@@ -183,6 +216,10 @@ flSchViewName="schematic"
 flFindMissingByPins=t
 flTraverseMosaics=t
 flPinDescendLimit=4
+; CURRENT: a block endpoint whose block is placed directly in the edit
+; cell with the pin label at its top level is marked there (t), instead of
+; being skipped with "use CURRENT TO BOTTOM" (nil).
+flCurrentBlockPins=t
 ; Schematic levels followed below an unlabeled block endpoint (BOTTOM mode).
 flSchDescendLimit=6
 ; Summary window closes by itself after this many seconds (0 = stays open).
@@ -211,6 +248,10 @@ flNetconCells=list(
     list("wire_couple" "N1" "N2")
     list("wire_model" "N1" "N2")
 )
+; Cells whose name starts with one of these are pass-through cells too
+; (wire_model2, ...): N1 <-> N2 when the cell has both, else its two
+; terminals when it has exactly two; otherwise not followed.
+flNetconPrefixes=list("wire_")
 ; L2S CURRENT TO BOTTOM: follow the net into block cells by pin bit
 ; (flTraceDown) and up to the parent cell when the schematic was entered by
 ; descend (flTraceUpLevels levels). At most flTraceMaxNets extra nets.
@@ -220,6 +261,9 @@ flTraceMaxNets=50
 
 flIdentityLabelLayers=list("ITXT" "M1TXT")
 flTerminalLabelLayers=list("ITXT" "M1TXT")
+; Pin labels are also read on every layer whose name ends with this text
+; (M2TXT, M3TXT, TMTXT, ...). nil = only flTerminalLabelLayers.
+flTerminalLabelSuffix="TXT"
 
 ; Labels inside PCell masters are terminal texts (D, S, G), not net or
 ; instance names: skip them in name searches. They are still read for
@@ -2482,6 +2526,31 @@ procedure(flCheckOption(inst instName)
     )
 )
 
+; True when a label on `layer` can be a pin label: listed in
+; flTerminalLabelLayers, or its name ends with flTerminalLabelSuffix.
+procedure(flTerminalLayerP(layer)
+    prog((n m)
+        unless(stringp(layer) return(nil))
+        when(member(layer flTerminalLabelLayers) return(t))
+        unless(stringp(flTerminalLabelSuffix) return(nil))
+
+        n=strlen(layer)
+        m=strlen(flTerminalLabelSuffix)
+
+        when(
+            and(
+                m>0
+                n>=m
+                substring(layer n-m+1 m)==flTerminalLabelSuffix
+            )
+
+            return(t)
+        )
+
+        return(nil)
+    )
+)
+
 ; Read terminal labels only one level inside the placed PCell/SCell.
 procedure(flTerminalPoints(inst pinName)
     prog((points p master tr)
@@ -2493,7 +2562,7 @@ procedure(flTerminalPoints(inst pinName)
             when(
                 fig~>objType=="label" &&
                 fig~>theLabel==pinName &&
-                member(fig~>layerName flTerminalLabelLayers)
+                flTerminalLayerP(fig~>layerName)
 
                 p=dbTransformPoint(
                     fig~>xy tr
@@ -3001,80 +3070,365 @@ procedure(flSchCellOf(instName)
     )
 )
 
-; Endpoint with no instance-name label: when exactly one layout instance
-; of its schematic cell (same name, or a name variant for blocks) is
-; directly inside the occurrence and it has the pin label, the pin gets the
-; donut. No box otherwise (it only clutters large blocks).
-; Return t when the pin was marked.
-procedure(flMarkPinByCell(occ name instName pinName hs)
-    prog((rec schInst cell master masters match insts points point swap)
-        rec=assoc(instName flCurrentSchInsts || flSchInstances)
-        schInst=if(rec then cadr(rec) else nil)
-        unless(schInst return(nil))
+; Elements of one child record of a layout master: list of (master
+; transform) in that master's coordinates. A mosaic gives every element.
+procedure(flRecordElems(rec)
+    prog((out xy row col)
+        if(car(rec)=='inst then
+            out=list(list(cadr(rec) nth(2 rec)))
+        else
+            xy=nth(2 rec)
+            row=0
 
-        cell=car(errset(schInst~>cellName nil))
-        unless(stringp(cell) return(nil))
+            while(row<nth(4 rec)
+                col=0
 
-        foreach(inst car(occ)~>instances
-            when(inst~>objType=="inst"
-                master=car(errset(inst~>master nil))
+                while(col<nth(5 rec)
+                    out=cons(
+                        list(
+                            cadr(rec)
+                            list(
+                                list(
+                                    car(xy)+col*nth(6 rec)
+                                    cadr(xy)+row*nth(7 rec)
+                                )
+                                nth(3 rec)
+                                1.0
+                            )
+                        )
+                        out
+                    )
+                    col=col+1
+                )
 
-                when(master && !member(master masters)
-                    masters=cons(master masters)
+                row=row+1
+            )
+
+            out=reverse(out)
+        )
+
+        return(out)
+    )
+)
+
+; Placements of the masters `cells` directly in layout master `master`:
+; instances, mosaic elements, and units inside a bundle (<cell>_x<N> or
+; <cell>x<N>, e.g. sramcellx2 placed as a mosaic). Each is a placed object
+; ('flElem master transform name cellName bBox) in `master` coordinates.
+; noBundles=t: units inside a bundle are left out (CURRENT).
+procedure(flCellPlacements(master cells @optional noBundles)
+    prog((out)
+        foreach(rec flChildList(master)
+            foreach(e flRecordElems(rec)
+                cond(
+                    (member(car(e) cells)
+                        out=cons(
+                            list('flElem car(e) cadr(e) "" car(e)~>cellName nil)
+                            out
+                        )
+                    )
+                    (and(!noBundles flBundleOf(car(e) cells))
+                        foreach(r2 flChildList(car(e))
+                            foreach(e2 flRecordElems(r2)
+                                when(member(car(e2) cells)
+                                    out=cons(
+                                        list(
+                                            'flElem
+                                            car(e2)
+                                            dbConcatTransform(cadr(e2) cadr(e))
+                                            ""
+                                            car(e2)~>cellName
+                                            nil
+                                        )
+                                        out
+                                    )
+                                )
+                            )
+                        )
+                    )
                 )
             )
         )
 
-        match=flCellNameMatch(
-            cell
-            masters
-            car(errset(flBlockCellP(schInst~>libName cell) nil))
+        return(reverse(out))
+    )
+)
+
+; Members of schematic cell `cell` in the schematic that holds schInst.
+procedure(flSchCellCount(schInst cell)
+    prog((cv n)
+        cv=car(errset(schInst~>cellView nil))
+        n=0
+
+        foreach(i if(cv then cv~>instances else nil)
+            when(i~>cellName==cell && !flPinSymbolP(i)
+                n=n+max(1 length(flExpand(i~>name)))
+            )
         )
+
+        return(n)
+    )
+)
+
+; Endpoints of the current group on schematic cell `cell` with pin
+; `pinName` (distinct instances).
+procedure(flPairCellCount(cell pinName)
+    prog((seen)
+        foreach(pair flCurrentPairs
+            when(
+                cadr(pair)==pinName &&
+                !member(car(pair) seen) &&
+                flSchCellOf(car(pair))==cell
+
+                seen=cons(car(pair) seen)
+            )
+        )
+
+        return(length(seen))
+    )
+)
+
+; CURRENT: schematic block instance `inst` is placed directly in the edit
+; cell (instance, mosaic or bundle unit) and every placement carries pin
+; label `pinName` at the top level of its layout.
+procedure(flBlockPinHere(inst pinName)
+    prog((match places ok)
+        match=flCellNameMatch(inst~>cellName flMasters t)
         unless(car(match) return(nil))
 
-        foreach(inst car(occ)~>instances
-            when(
-                inst~>objType=="inst" &&
-                member(car(errset(inst~>master nil)) car(match))
+        places=flCellPlacements(flRootCV car(match) t)
+        unless(places return(nil))
 
-                insts=cons(inst insts)
+        ok=t
+
+        foreach(p places
+            unless(flTerminalPoints(p pinName)
+                ok=nil
             )
         )
 
-        unless(length(insts)==1 return(nil))
+        return(ok)
+    )
+)
 
-        points=flTerminalPoints(car(insts) pinName)
-        unless(points return(nil))
+; BOTTOM: placements of the saved schematic cell's layout (flSourceMasters)
+; that hold occurrence `occ`, not `occ` itself.
+procedure(flSourceOccsOf(occ)
+    prog((out)
+        foreach(o flOccurrences
+            when(
+                and(
+                    member(car(o) flSourceMasters)
+                    caddr(o)!=caddr(occ)
+                    flUnderPath(caddr(occ) caddr(o))
+                )
 
-        swap=flSwapPoints(car(insts) pinName)
-
-        if(swap then
-            foreach(p append(points swap)
-                point=dbTransformPoint(p cadr(occ))
-                flMarkCandidate(hs point)
-                flCandidateMarks=flCandidateMarks+1
+                out=cons(o out)
             )
+        )
 
-            flCandidatePins=flCandidatePins+1
+        return(out)
+    )
+)
 
-            flNote(sprintf(nil
-                "[S2L] %s: %s has no instance-name label%s - %s and %s boxed on %s (by cell name; S/D may be swapped)"
-                name instName flWhere(caddr(occ)) pinName flSwapName(pinName)
-                car(insts)~>cellName
-            ))
-        else
-            foreach(p points
-                point=dbTransformPoint(p cadr(occ))
-                flMark(hs point list(point point))
-                flPinMarks=flPinMarks+1
-            )
+; Endpoint with no instance-name label: its pin is marked by cell name.
+; Placements of its schematic cell (same name, or a name variant for
+; blocks) in the occurrence: instances, mosaic elements and units inside
+; a bundle.
+;   one placement       its pin gets the donut
+;   several             only when every schematic instance of that cell
+;                       in the block is on this net with this pin and the
+;                       counts match (e.g. 16 sramcell on a bit line):
+;                       every placement's pin gets the donut, done once
+;   otherwise           nothing is marked (which is which is not known)
+; Not placed in `occ` (BOTTOM): the layout of the saved schematic cell
+; around it is tried (noUp=t for that retry).
+; Return t (marked), 'done (handled together with the other instances of
+; the cell) or a reason string for the CIW ('none: not placed, retry only).
+procedure(flMarkPinByCell(occ name instName pinName hs @optional noUp)
+    prog((rec schInst cell match places n key memo schCount netCount
+          found points swap point anySwap up r tried bundles)
+        rec=assoc(instName flCurrentSchInsts || flSchInstances)
+        schInst=if(rec then cadr(rec) else nil)
+        unless(schInst return("schematic instance not found"))
 
+        cell=car(errset(schInst~>cellName nil))
+        unless(stringp(cell) return("cell name not known"))
+
+        ; Several placements are decided once per cell and pin.
+        key=sprintf(nil "%s|%s|%s|%s" name caddr(occ) cell pinName)
+        memo=flPinGroupMemo[key]
+
+        when(memo=='marked
             flFoundPins=flFoundPins+1
+            return(t)
+        )
+        when(memo return('done))
 
-            flNote(sprintf(nil
-                "[S2L] %s: %s has no instance-name label%s - pin %s marked on %s (by cell name)"
-                name instName flWhere(caddr(occ)) pinName car(insts)~>cellName
+        match=flCellNameMatch(
+            cell
+            flMasters
+            car(errset(flBlockCellP(schInst~>libName cell) nil))
+        )
+        unless(car(match)
+            return(sprintf(nil "no layout cell %s" cell))
+        )
+
+        ; CURRENT: this level only (no units inside a bundle).
+        places=flCellPlacements(car(occ) car(match) !flBottomMode)
+        n=length(places)
+
+        ; CURRENT: the cell is only inside bundles here (sramcell in
+        ; sramcellx2): below this cell, said once for the cell and pin.
+        when(and(n==0 !flBottomMode flCellPlacements(car(occ) car(match)))
+            foreach(rec flChildList(car(occ))
+                when(
+                    and(
+                        flBundleOf(cadr(rec) car(match))
+                        !member(cadr(rec)~>cellName bundles)
+                    )
+
+                    bundles=cons(cadr(rec)~>cellName bundles)
+                )
+            )
+
+            flPinGroupMemo[key]='failed
+
+            flSoftAlert(sprintf(nil
+                "[S2L] %s: %s is inside %s (below this cell) - pin %s not marked in CURRENT; use CURRENT TO BOTTOM"
+                name cell flNameListText(reverse(bundles)) pinName
             ))
+
+            return('done)
+        )
+
+        when(n==0
+            ; BOTTOM: the cell chosen by labels may hold only some of the
+            ; endpoints (sramx16_unit1 in a_sramx16): try the saved cell.
+            unless(noUp
+                foreach(o flSourceOccsOf(occ)
+                    r=flMarkPinByCell(o name instName pinName hs t)
+                    tried=cons(car(o)~>cellName tried)
+
+                    cond(
+                        (r==t
+                            up=t
+                        )
+                        (and(r=='done up!=t)
+                            up='done
+                        )
+                        (and(stringp(r) !up)
+                            up=r
+                        )
+                    )
+                )
+
+                when(up return(up))
+
+                when(tried
+                    return(sprintf(nil "%s is not placed in %s or %s"
+                        cell car(occ)~>cellName car(tried)
+                    ))
+                )
+            )
+
+            return(
+                if(noUp then
+                    'none
+                else
+                    sprintf(nil "%s is not placed in %s" cell car(occ)~>cellName)
+                )
+            )
+        )
+
+        when(n>1
+            schCount=flSchCellCount(schInst cell)
+            netCount=flPairCellCount(cell pinName)
+
+            unless(netCount==n && schCount==n
+                flPinGroupMemo[key]='failed
+
+                flSoftAlert(sprintf(nil
+                    "[S2L] %s: %d %s have no instance-name label%s - not marked (%d on this net, %d in schematic, %d in layout; which is which is not known)"
+                    name netCount cell flWhere(caddr(occ))
+                    netCount schCount n
+                ))
+
+                return('done)
+            )
+        )
+
+        ; Every placement must carry the pin label.
+        foreach(p places
+            points=flTerminalPoints(p pinName)
+
+            if(points then
+                found=cons(list(p points) found)
+            else
+                unless(n>1
+                    return(sprintf(nil "pin %s label not found in %s" pinName cell))
+                )
+
+                flPinGroupMemo[key]='failed
+
+                flSoftAlert(sprintf(nil
+                    "[S2L] %s: %d %s have no instance-name label%s - not marked (pin %s label not found in %s)"
+                    name n cell flWhere(caddr(occ)) pinName cell
+                ))
+
+                return('done)
+            )
+        )
+
+        foreach(f reverse(found)
+            swap=flSwapPoints(car(f) pinName)
+
+            if(swap then
+                anySwap=t
+
+                foreach(p append(cadr(f) swap)
+                    point=dbTransformPoint(p cadr(occ))
+                    flMarkCandidate(hs point)
+                    flCandidateMarks=flCandidateMarks+1
+                )
+            else
+                foreach(p cadr(f)
+                    point=dbTransformPoint(p cadr(occ))
+                    flMark(hs point list(point point))
+                    flPinMarks=flPinMarks+1
+                )
+            )
+        )
+
+        if(anySwap then
+            flCandidatePins=flCandidatePins+1
+        else
+            flFoundPins=flFoundPins+1
+        )
+
+        cond(
+            (n>1
+                flPinGroupMemo[key]='marked
+
+                flNote(sprintf(nil
+                    "[S2L] %s: %d %s have no instance-name label%s - all %d are on this net, pin %s marked on all%s"
+                    name n cell flWhere(caddr(occ)) n pinName
+                    if(anySwap then " (S/D may be swapped)" else "")
+                ))
+            )
+            (anySwap
+                flNote(sprintf(nil
+                    "[S2L] %s: %s has no instance-name label%s - %s and %s boxed on %s (by cell name; S/D may be swapped)"
+                    name instName flWhere(caddr(occ)) pinName flSwapName(pinName)
+                    cell
+                ))
+            )
+            (t
+                flNote(sprintf(nil
+                    "[S2L] %s: %s has no instance-name label%s - pin %s marked on %s (by cell name)"
+                    name instName flWhere(caddr(occ)) pinName cell
+                ))
+            )
         )
 
         return(t)
@@ -3097,10 +3451,12 @@ procedure(flNoPinText(name pinName instName path)
 
 procedure(flMarkRequiredPins(occ name pairs hs)
     prog((transform path resolved status insts points point
-          instName pinName cellName message swap)
+          instName pinName cellName message swap reason)
 
         transform=cadr(occ)
         path=caddr(occ)
+        ; Endpoints of this group, for the cell-name counts.
+        flCurrentPairs=pairs
 
         foreach(pair pairs
             instName=car(pair)
@@ -3130,12 +3486,44 @@ procedure(flMarkRequiredPins(occ name pairs hs)
                 (status=='missing
                     ; No name label: its pin by cell name if certain; else
                     ; CIW only (popup only when nothing was marked).
-                    unless(flMarkPinByCell(occ name instName pinName hs)
-                        flMissingIdentity=flMissingIdentity+1
+                    ; CURRENT: an instance-name label in a lower cell means
+                    ; the instance is below this level: not marked here.
+                    reason=if(and(!flBottomMode flLabelKnown(instName)) then
+                        'below
+                    else
+                        flMarkPinByCell(occ name instName pinName hs)
+                    )
+
+                    when(reason=='below
                         cellName=flSchCellOf(instName)
 
                         message=sprintf(nil
-                            "[S2L] %s: %s%s has no instance-name label%s - not marked"
+                            "[S2L] %s: %s%s label is below this cell - not marked in CURRENT; use CURRENT TO BOTTOM"
+                            name
+                            instName
+                            if(stringp(cellName) then
+                                sprintf(nil " (%s)" cellName)
+                            else
+                                ""
+                            )
+                        )
+
+                        unless(member(message flWarnings)
+                            flSoftAlert(message)
+                        )
+                    )
+
+                    unless(reason==t
+                        flMissingIdentity=flMissingIdentity+1
+                    )
+
+                    ; String: this endpoint alone, with the reason.
+                    ; 'done: the cell's instances were reported together.
+                    when(stringp(reason)
+                        cellName=flSchCellOf(instName)
+
+                        message=sprintf(nil
+                            "[S2L] %s: %s%s has no instance-name label%s - not marked (%s)"
                             name
                             instName
                             if(stringp(cellName) then
@@ -3144,6 +3532,7 @@ procedure(flMarkRequiredPins(occ name pairs hs)
                                 ""
                             )
                             flWhere(path)
+                            reason
                         )
 
                         unless(member(message flWarnings)
@@ -3592,7 +3981,7 @@ procedure(flBlockMatch(child scopes labeled depth)
 procedure(flExpandGroups(netName schCv pairs instMap path depth scopes score
                         @optional innerName)
     prog((keep groups rec inst r child sigName info subPairs sub match
-          labeled follow memoKey memo blk dup)
+          labeled follow memoKey memo blk dup pass)
         foreach(pair pairs
             ; Time limit: stop here; the caller drops the pin guide.
             when(flSoftTimeUp() return(groups))
@@ -3603,7 +3992,15 @@ procedure(flExpandGroups(netName schCv pairs instMap path depth scopes score
             follow=nil
             dup=nil
 
-            when(depth<flSchDescendLimit
+            ; Pass-through cells (netcon, wire_ models) have no layout:
+            ; not an endpoint to mark.
+            rec=assoc(car(pair) instMap)
+            pass=and(
+                rec
+                flNetconRule(car(errset(cadr(rec)~>cellName nil)))
+            )
+
+            when(and(!pass depth<flSchDescendLimit)
                 rec=assoc(car(pair) instMap)
                 inst=if(rec then cadr(rec) else nil)
                 labeled=flLabelKnown(car(pair))
@@ -3704,6 +4101,35 @@ procedure(flExpandGroups(netName schCv pairs instMap path depth scopes score
                         child=nil
                     )
 
+                    ; Not a block (a cell made of devices only, e.g.
+                    ; sramcell): when its layout is not entered, keep the
+                    ; endpoint here; its pin is then found by cell name.
+                    when(
+                        and(
+                            !sub
+                            child
+                            !dup
+                            !car(errset(flBlockCellP(child~>libName child~>cellName) nil))
+                        )
+
+                        child=nil
+                    )
+
+                    ; CURRENT: a block placed directly in the edit cell with
+                    ; the pin label at its top level is kept here too.
+                    when(
+                        and(
+                            !sub
+                            child
+                            !dup
+                            !flBottomMode
+                            flCurrentBlockPins
+                            car(errset(flBlockPinHere(inst cadr(pair)) nil))
+                        )
+
+                        child=nil
+                    )
+
                     when(!sub && child && !dup && !flBottomMode &&
                          car(errset(flBlockCellP(child~>libName child~>cellName) nil))
                         flBlockSkips=flBlockSkips+1
@@ -3745,6 +4171,12 @@ procedure(flExpandGroups(netName schCv pairs instMap path depth scopes score
             )
 
             cond(
+                (pass
+                    flDetail(sprintf(nil
+                        "[PIN-FIND] PASS-THROUGH net=%L %s pin=%L: no layout, not marked"
+                        netName flJoin(path car(pair)) cadr(pair)
+                    ))
+                )
                 (sub
                     groups=append(groups sub)
                 )
@@ -3882,28 +4314,30 @@ procedure(flMarkGuide(hs bb)
 ; the CIW shows Name, Library and Cell. BOTTOM: placements below the edit cell
 ; get a box + X. Return the number of hits.
 ; Layout master `master` is a bundle of one of the target cells: named
-; <cell>_x<N> (a_saio_x2) and holding that cell directly. Returns the
-; target master, or nil.
+; <cell>_x<N> (a_saio_x2) or <cell>x<N> (sramcellx2) and holding that
+; cell directly. Returns the target master, or nil.
 procedure(flBundleOf(master cells)
     prog((name found prefix rest)
         name=car(errset(master~>cellName nil))
         unless(stringp(name) return(nil))
 
         foreach(t0 cells
-            unless(found
-                prefix=strcat(t0~>cellName "_x")
-
-                when(
-                    strlen(name)>strlen(prefix) &&
-                    substring(name 1 strlen(prefix))==prefix
-
-                    rest=substring(name strlen(prefix)+1)
+            foreach(sep list("_x" "x")
+                unless(found
+                    prefix=strcat(t0~>cellName sep)
 
                     when(
-                        rexMatchp("^[0-9]+$" rest) &&
-                        exists(rec flChildList(master) cadr(rec)==t0)
+                        strlen(name)>strlen(prefix) &&
+                        substring(name 1 strlen(prefix))==prefix
 
-                        found=t0
+                        rest=substring(name strlen(prefix)+1)
+
+                        when(
+                            rexMatchp("^[0-9]+$" rest) &&
+                            exists(rec flChildList(master) cadr(rec)==t0)
+
+                            found=t0
+                        )
                     )
                 )
             )
@@ -4817,7 +5251,7 @@ procedure(flMarkFound(name)
 ; Rule for a cell: nil (not a netcon cell), t (any terminal pair) or the
 ; two terminal names that are passed through.
 procedure(flNetconRule(cellName)
-    prog((rule)
+    prog((rule n)
         foreach(e flNetconCells
             cond(
                 (rule nil)
@@ -4829,7 +5263,53 @@ procedure(flNetconRule(cellName)
                 )
             )
         )
+
+        ; Name prefix (wire_model2, ...): the terminals are chosen per
+        ; instance (flNetconInstRule).
+        when(!rule && stringp(cellName) && listp(flNetconPrefixes)
+            foreach(p flNetconPrefixes
+                n=strlen(p)
+
+                when(
+                    and(
+                        !rule
+                        strlen(cellName)>n
+                        substring(cellName 1 n)==p
+                    )
+
+                    rule='auto
+                )
+            )
+        )
+
         return(rule)
+    )
+)
+
+; Rule for one instance: as flNetconRule; a prefix cell passes N1 <-> N2
+; when it has both, else its two terminals when it has exactly two.
+procedure(flNetconInstRule(inst)
+    prog((rule names)
+        rule=flNetconRule(car(errset(inst~>cellName nil)))
+        unless(rule=='auto return(rule))
+
+        names=car(errset(inst~>master~>terminals~>name nil))
+
+        cond(
+            (and(member("N1" names) member("N2" names))
+                return(list("N1" "N2"))
+            )
+            (length(names)==2
+                return(t)
+            )
+        )
+
+        flNote(sprintf(nil
+            "[L2S] %s (%s): pass-through terminals not known, not followed"
+            car(errset(inst~>name nil)) car(errset(inst~>cellName nil))
+        ) t)
+
+        return(nil)
     )
 )
 
@@ -4861,7 +5341,7 @@ procedure(flNetconPartners(cv name)
             pos=cadr(rec)
             inst=car(errset(it~>inst nil))
 
-            rule=if(inst then flNetconRule(car(errset(inst~>cellName nil))) else nil)
+            rule=if(inst then flNetconInstRule(inst) else nil)
 
             when(
                 inst &&
@@ -5735,7 +6215,7 @@ procedure(flRun(cv direction)
           flStartTime flTimeTicks flLastElapsed flTimeStopped flHardStopped
           flReachTable flMatchCache flGroupMemo flCellSelected flBoxSeen
           flProbeOrder
-          flCellsBelowTable
+          flCellsBelowTable flPinGroupMemo flCurrentPairs
           win r path shown)
 
         flVisits=0
@@ -5771,6 +6251,7 @@ procedure(flRun(cv direction)
         flTopFound=makeTable('flTopFound nil)
         flLaySourceTable=makeTable('flLaySourceTable nil)
         flCellsBelowTable=makeTable('flCellsBelowTable nil)
+        flPinGroupMemo=makeTable('flPinGroupMemo nil)
         flBoxSeen=makeTable('flBoxSeen nil)
         flStartTime=getCurrentTime()
         flTimeTicks=0
