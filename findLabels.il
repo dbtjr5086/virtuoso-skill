@@ -1,4 +1,12 @@
-; findLabels.il -- 3.56
+; findLabels.il -- 3.58
+; Highlight colors: inside a group the color names are tried in the
+; listed order, so a dark pink (magenta) is chosen before a light pink
+; (pink) whatever their layer order (y1 pink, y2 magenta).
+; 3.57:
+; Highlight colors: one color per group of flColorOrder first (pink,
+; orange, yellow, green, blue, purple, white), then the other colors. A
+; second pink (light pink) no longer comes before orange.
+; 3.56:
 ; CURRENT keeps the net connection guide at this level only: instances
 ; placed directly in the edit cell. Pins of cells inside a bundle
 ; (sramcell in sramcellx2) and endpoints whose instance-name label is in a
@@ -189,7 +197,7 @@ unless(boundp('flSummaryOpen) flSummaryOpen=nil)
 ; Block cells (schematic made of sub-cells), cached per load.
 flBlockCellCache=makeTable('flBlockCellCache nil)
 
-flVersion="3.56"
+flVersion="3.58"
 flBottomMode=nil
 flSchTargets=nil
 flLayTargets=nil
@@ -306,10 +314,12 @@ flProbeLPPs=list(
 )
 
 ; Highlight colors are used in this order, by the display color name of
-; each highlight layer (y0..y9); colors matching none come last.
+; each highlight layer (y0..y9): the first color of each group, then all
+; the other colors (a second pink, ...).
 ; flShowColors() lists the layers, their colors and the order used.
+; Inside a group the names are tried in this order (dark pink first).
 flColorOrder=list(
-    list("pink" "magenta" "rose" "fuchsia")
+    list("magenta" "fuchsia" "deeppink" "hotpink" "pink" "rose")
     list("orange")
     list("yellow" "gold")
     list("green" "lime")
@@ -1232,7 +1242,7 @@ procedure(flShowColors()
 )
 
 procedure(flPalette(cv)
-    prog((tf out used r lp packet color colors sorted)
+    prog((tf out used r lp packet color colors sorted hit)
         tf=techGetTechFile(cv)
         unless(tf return(nil))
 
@@ -1260,18 +1270,26 @@ procedure(flPalette(cv)
             )
         )
 
-        ; Order by color: pink, orange, yellow, green, blue, purple, rest.
+        ; Order by color: one pink, one orange, one yellow, one green, one
+        ; blue, one purple, one white, then the rest (a second pink etc.).
         colors=reverse(colors)
         sorted=nil
 
         foreach(group flColorOrder
-            foreach(rec colors
-                when(
-                    !member(car(rec) sorted) &&
-                    stringp(cadr(rec)) &&
-                    exists(want group rexMatchp(want lowerCase(cadr(rec))))
+            hit=nil
 
-                    sorted=append(sorted list(car(rec)))
+            ; Names in the listed order: magenta before pink.
+            foreach(want group
+                foreach(rec colors
+                    when(
+                        !hit &&
+                        !member(car(rec) sorted) &&
+                        stringp(cadr(rec)) &&
+                        rexMatchp(want lowerCase(cadr(rec)))
+
+                        hit=t
+                        sorted=append(sorted list(car(rec)))
+                    )
                 )
             )
         )
