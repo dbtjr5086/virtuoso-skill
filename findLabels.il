@@ -1,4 +1,16 @@
-; findLabels.il -- 3.58
+; findLabels.il -- 3.60
+; Comments only: design-specific example names are replaced by general
+; names (blk_gen, bitcell, BUSA, ...). No change in behavior.
+; 3.59:
+; L2S CURRENT TO BOTTOM: when the schematic of the layout cell the label
+; was saved in (e.g. blk_in) is below the searched cell but has no net with
+; that name, the label does not match the schematic: the CIW says so at
+; once ("not a net in schematic blk_in ... check the label") and the slow
+; search of every cell by name is skipped. Hint: up to flHintMax schematic
+; cells below that do have the net (each cell checked once), e.g. blk_grp.
+; Nothing is probed for it. Search by name everywhere is kept only when
+; that cell is not below the searched cell at all.
+; 3.58:
 ; Highlight colors: inside a group the color names are tried in the
 ; listed order, so a dark pink (magenta) is chosen before a light pink
 ; (pink) whatever their layer order (y1 pink, y2 magenta).
@@ -9,32 +21,32 @@
 ; 3.56:
 ; CURRENT keeps the net connection guide at this level only: instances
 ; placed directly in the edit cell. Pins of cells inside a bundle
-; (sramcell in sramcellx2) and endpoints whose instance-name label is in a
+; (bitcell in bitcellx2) and endpoints whose instance-name label is in a
 ; lower cell are not marked; the CIW says to use CURRENT TO BOTTOM.
 ; CURRENT TO BOTTOM is unchanged.
 ; S2L: pass-through cells (netcon, wire_ models) are no longer endpoints;
 ; they have no layout (no "use CURRENT TO BOTTOM" note for them).
 ; 3.55:
 ; An endpoint on a cell made of devices only (no sub-cell schematics, e.g.
-; sramcell) is no longer dropped when its layout is not entered: it stays
+; bitcell) is no longer dropped when its layout is not entered: it stays
 ; at its level and its pin is found by cell name (both modes).
 ; CURRENT: a block placed directly in the edit cell whose layout has the
 ; pin label at its top level is marked there too (flCurrentBlockPins);
 ; other blocks are skipped with "use CURRENT TO BOTTOM" as before.
 ; CURRENT TO BOTTOM: an endpoint with no instance-name label whose cell is
-; not placed in the cell chosen by labels (e.g. sramx16_unit1, which holds
+; not placed in the cell chosen by labels (e.g. arr_unit1, which holds
 ; only the P2 and P0q labels) is looked up by cell name in the layout of
-; the saved schematic cell around it (a_sramx16).
+; the saved schematic cell around it (blk_arr).
 ; 3.54:
 ; Pin labels are read on every text layer whose name ends with TXT
 ; (M2TXT, M3TXT, TMTXT, ...), not only ITXT and M1TXT
 ; (flTerminalLabelSuffix). Instance-name labels are unchanged.
 ; Endpoint with no instance-name label, marked by cell name: placements in
 ; mosaics and units inside a bundle count too, and a bundle may be named
-; <cell>x<N> (sramcellx2) as well as <cell>_x<N>. With several placements
+; <cell>x<N> (bitcellx2) as well as <cell>_x<N>. With several placements
 ; the pins are marked only when every schematic instance of that cell in
 ; the block is on this net with this pin and the counts match (e.g. 16
-; sramcell on a bit line); otherwise nothing is marked and one CIW line
+; bitcell on a bit line); otherwise nothing is marked and one CIW line
 ; gives the counts. The CIW also says why an endpoint was not marked
 ; (cell not placed here, pin label not found).
 ; L2S: every cell whose name starts with wire_ is a pass-through cell
@@ -48,12 +60,12 @@
 ; half size 0.4 (flCandidateHalf, a quarter of before). Block outline
 ; boxes are unchanged.
 ; Endpoint whose pin is not found and that is not a placed block here
-; (e.g. a nand drawn flat with lvn/lvp, no A/B labels): no pin is guessed;
+; (e.g. a nand drawn flat with nch/pch, no A/B labels): no pin is guessed;
 ; its instance-name label (I12) is marked and a warning names the pin.
 ; "Use CURRENT TO BOTTOM" is kept only for a real block instance (layout
 ; cell with the schematic cell name or a name variant, not a PCell).
 ; 3.51:
-; PCell labels: the small terminal texts inside PCells (D, S, G of lvn/lvp)
+; PCell labels: the small terminal texts inside PCells (D, S, G of nch/pch)
 ; are no longer taken as net or instance names (flSkipPCellLabels). A net
 ; named D or S is found only on real labels. Terminal marks still use them.
 ; MOS source/drain are swappable in layout (flSwapPins): a D or S terminal
@@ -71,15 +83,15 @@
 ; Below the edit cell, mosaic elements and units inside a bundle get a
 ; box + X again (easier to see). A block box shared by several bits
 ; (Imain<0>..<7>) is drawn once.
-; Bundle cells: a layout cell named <cell>_x<N> (e.g. a_saio_x2) that holds
-; the cell directly stands for it (e.g. 8 a_saio placed as a 1x4 mosaic of
-; a_saio_x2). In the edit cell the bundle is selected; below it, every
-; inner a_saio gets a plain box (bit order is not known).
-; KP_3 on a layout instance or mosaic (e.g. a_saiox8): its cell name is
+; Bundle cells: a layout cell named <cell>_x<N> (e.g. unit_io_x2) that holds
+; the cell directly stands for it (e.g. 8 unit_io placed as a 1x4 mosaic of
+; unit_io_x2). In the edit cell the bundle is selected; below it, every
+; inner unit_io gets a plain box (bit order is not known).
+; KP_3 on a layout instance or mosaic (e.g. unit_iox8): its cell name is
 ; saved. In the schematic the instances of that cell (same name, or a name
 ; variant for blocks) are found: in the searched cell they are selected
 ; (other selections cleared); CURRENT TO BOTTOM also probes them below.
-; Instance target found by cell name: mosaics count too (e.g. a_saiox8
+; Instance target found by cell name: mosaics count too (e.g. unit_iox8
 ; placed as a 1x8 mosaic). In the edit cell the mosaic is selected; below
 ; it, every mosaic element gets a plain box (bit order is not known).
 ; When a block is found this way, the layout selection is cleared first and
@@ -89,7 +101,7 @@
 ; Endpoint with no instance-name label: when exactly one layout instance
 ; of its schematic cell (same name or name variant) is inside that block
 ; and it has the pin label, the pin gets the donut. Otherwise no box: the
-; CIW names the cell, e.g. "Idogrp (a_dogrp) has no instance-name label in
+; CIW names the cell, e.g. "Igrp (blk_grp) has no instance-name label in
 ; /I0 - not marked"; the popup shows it only when nothing was marked.
 ; Large blocks: block placement checks and block descents are cached, so a
 ; net spread over a large block (e.g. a test-mode signal) no longer hangs.
@@ -98,24 +110,24 @@
 ; popup says so. The whole search stops at twice that time (failed).
 ; The CIW result line shows the time taken.
 ; L2S BOTTOM: a target not in the searched cell is looked up below only in
-; the schematic of the layout cell the labels were saved in (a_dogrp), and
+; the schematic of the layout cell the labels were saved in (blk_grp), and
 ; traced from there; other cells by name only when that cell is not found.
 ; wire_model (N1 <-> N2) is a pass-through cell like netcon / wire_couple.
 ; Previous selections in a cellview no longer shown in a window are not
 ; deselected (avoids GE-2106 warnings).
-; Name variants (crc_gen_xxx, xxx_crc_gen) are one candidate set; parts
-; placed inside another candidate (crc_gen_u01 in temp_crc_gen) are dropped.
+; Name variants (blk_gen_xxx, xxx_blk_gen) are one candidate set; parts
+; placed inside another candidate (blk_gen_u01 in temp_blk_gen) are dropped.
 ; A net label in the saved cell's layout replaces that cell's own terminal
 ; marks; endpoints are looked up only inside the saved cell when found.
-; Cell names: same name, else crc_gen_xxx, else xxx_crc_gen (block cells),
+; Cell names: same name, else blk_gen_xxx, else xxx_blk_gen (block cells),
 ; for block layouts, the saved cell and instance targets.
-; Inside a block, a label with the net's inner name (CRCRD for csm_CRCRD)
+; Inside a block, a label with the net's inner name (SIGRD for top_SIGRD)
 ; is marked instead of the terminals.
 ; BOTTOM: endpoint instances are looked up in the layout of the schematic
-; cell the targets were saved in (crc_gen) first, so auto names (I59) of
+; cell the targets were saved in (blk_gen) first, so auto names (I59) of
 ; other cells are not used. Net labels are still found everywhere.
 ; Short CIW and popup: one line per problem, e.g.
-; "CRC_BD_ERR: not in this cell (inside crc_gen, crc_reg). Use CURRENT TO
+; "SIG_ERR: not in this cell (inside blk_gen, blk_reg). Use CURRENT TO
 ; BOTTOM."; trace and skip details only with flVerbose=t.
 ; L2S BOTTOM: a target found as a net in the searched cell is not searched
 ; again by name in lower cells (only traced by connectivity).
@@ -130,12 +142,12 @@
 ; Instance target found by cell name: selected, no Edit Properties window;
 ; the CIW shows Name, Library and Cell.
 ; Block endpoints at the saved level are followed into the block even when
-; a block instance-name label (Icrc_gen) is in the layout: the label is
+; a block instance-name label (Iblk_gen) is in the layout: the label is
 ; ignored. CURRENT: the block is not the edit cell -> NOT IN THIS CELL.
 ; BOTTOM: the block's net label if present, else the inner terminals.
 ; Instance target with no instance-name label: the layout instance of the
 ; same cell is selected (Name, Library, Cell in the CIW); a block cell may
-; carry a suffix (crc_gen_temp).
+; carry a suffix (blk_gen_temp).
 ; BOTTOM: placements below the edit cell get a box + X instead.
 ; CURRENT: a block endpoint whose pin is not in the edit cell is not marked
 ; on its instance-name label; the popup says to use CURRENT TO BOTTOM.
@@ -197,7 +209,7 @@ unless(boundp('flSummaryOpen) flSummaryOpen=nil)
 ; Block cells (schematic made of sub-cells), cached per load.
 flBlockCellCache=makeTable('flBlockCellCache nil)
 
-flVersion="3.58"
+flVersion="3.60"
 flBottomMode=nil
 flSchTargets=nil
 flLayTargets=nil
@@ -243,10 +255,10 @@ flUseCellNameMatch=t
 flBlockMatchMin=0.5
 ; Instance target without an instance-name label: select the layout
 ; instance of the same cell (blocks: also "<cell>_<suffix>", e.g.
-; crc_gen_temp); the CIW shows its Library, Cell and Name.
+; blk_gen_temp); the CIW shows its Library, Cell and Name.
 flSelectCellByName=t
-; L2S: also probe nets passed through these cells (e.g. TMBIT<0> =
-; ICAMTMBIT<2> through netcon).
+; L2S: also probe nets passed through these cells (e.g. BUSA<0> =
+; IBUSB<2> through netcon).
 ; Entry "cell": any terminal to any other terminal (2-terminal cells).
 ; Entry list("cell" "A" "B"): only terminal A <-> terminal B; the others
 ; are not followed (wire_couple: N1 <-> N2; B is the coupled neighbor).
@@ -266,6 +278,9 @@ flNetconPrefixes=list("wire_")
 flTraceDown=t
 flTraceUpLevels=2
 flTraceMaxNets=50
+; L2S: label whose net is not in the schematic of its layout cell: at most
+; this many schematic cells that have the net are named in the CIW.
+flHintMax=3
 
 flIdentityLabelLayers=list("ITXT" "M1TXT")
 flTerminalLabelLayers=list("ITXT" "M1TXT")
@@ -737,7 +752,7 @@ procedure(flSelectedPinTargets(cv)
 )
 
 ; Block cell: its schematic holds sub-cells that have their own schematic
-; (crc_gen made of flip-flops), not only primitive devices (a standard
+; (blk_gen made of flip-flops), not only primitive devices (a standard
 ; cell made of transistors). Cached per load.
 procedure(flBlockCellP(lib cell)
     prog((key cached r cv found)
@@ -895,7 +910,7 @@ procedure(flCaptureLay()
             )
 
             when(obj~>objType=="label"
-                ; Layout cell that holds the label (crc_gen, a_dogrp, ...).
+                ; Layout cell that holds the label (blk_gen, blk_grp, ...).
                 unless(flLaySourceCell
                     r=errset(obj~>cellView~>cellName nil)
                     flLaySourceCell=if(r then car(r) else nil)
@@ -952,7 +967,7 @@ procedure(flFigCellName(fig)
 )
 
 ; Schematic instance inst is of layout cell layCell: same cell name, or
-; for a block a name variant (crc_gen <- crc_gen_xxx, xxx_crc_gen).
+; for a block a name variant (blk_gen <- blk_gen_xxx, xxx_blk_gen).
 procedure(flSchCellMatch(inst layCell)
     prog((cell n m)
         cell=inst~>cellName
@@ -1915,7 +1930,7 @@ procedure(flChooseScopes(root pairs @optional evidence)
         names=if(evidence then evidence else flIdentityNames(pairs))
 
         ; The layout of the schematic cell the names were saved in
-        ; (crc_gen -> crc_gen), when it holds the endpoint labels. Auto
+        ; (blk_gen -> blk_gen), when it holds the endpoint labels. Auto
         ; names (I59, I210) of unrelated cells are then never used.
         unless(evidence
             foreach(m flSourceMasters
@@ -2002,7 +2017,7 @@ procedure(flChooseScopes(root pairs @optional evidence)
     )
 )
 
-; Short text such as "crc_gen, temp_crc_gen".
+; Short text such as "blk_gen, temp_blk_gen".
 procedure(flCellListText(cvs)
     prog((text count)
         text=""
@@ -2919,7 +2934,7 @@ procedure(flResolveInstance(cv name pinName)
     )
 )
 
-; Short text such as "I12(nand2_0p18), I15(zinvs1)".
+; Short text such as "I12(nand2), I15(inv1)".
 procedure(flInstanceListText(insts)
     prog((text count)
         text=""
@@ -3019,7 +3034,7 @@ procedure(flInLabelBlocks(path insts)
 
 ; True when one of the layout objects is a placed block for schematic
 ; cell `cell`: not a PCell, cell name equal to it or a name variant.
-; A gate drawn flat (lvn/lvp PCells under the label) is not a block.
+; A gate drawn flat (nch/pch PCells under the label) is not a block.
 procedure(flPlacedBlockP(cell layInsts)
     prog((found master)
         foreach(x layInsts
@@ -3039,7 +3054,7 @@ procedure(flPlacedBlockP(cell layInsts)
     )
 )
 
-; CURRENT: the pin of a block endpoint (e.g. Icrc_gen) is not in the edit
+; CURRENT: the pin of a block endpoint (e.g. Iblk_gen) is not in the edit
 ; cell. Its instance-name label is not marked; a note points to
 ; CURRENT TO BOTTOM. Return t when the endpoint is skipped.
 ; layInsts: layout objects found for the label. When none of them is a
@@ -3131,7 +3146,7 @@ procedure(flRecordElems(rec)
 
 ; Placements of the masters `cells` directly in layout master `master`:
 ; instances, mosaic elements, and units inside a bundle (<cell>_x<N> or
-; <cell>x<N>, e.g. sramcellx2 placed as a mosaic). Each is a placed object
+; <cell>x<N>, e.g. bitcellx2 placed as a mosaic). Each is a placed object
 ; ('flElem master transform name cellName bBox) in `master` coordinates.
 ; noBundles=t: units inside a bundle are left out (CURRENT).
 procedure(flCellPlacements(master cells @optional noBundles)
@@ -3256,7 +3271,7 @@ procedure(flSourceOccsOf(occ)
 ;   one placement       its pin gets the donut
 ;   several             only when every schematic instance of that cell
 ;                       in the block is on this net with this pin and the
-;                       counts match (e.g. 16 sramcell on a bit line):
+;                       counts match (e.g. 16 bitcell on a bit line):
 ;                       every placement's pin gets the donut, done once
 ;   otherwise           nothing is marked (which is which is not known)
 ; Not placed in `occ` (BOTTOM): the layout of the saved schematic cell
@@ -3296,8 +3311,8 @@ procedure(flMarkPinByCell(occ name instName pinName hs @optional noUp)
         places=flCellPlacements(car(occ) car(match) !flBottomMode)
         n=length(places)
 
-        ; CURRENT: the cell is only inside bundles here (sramcell in
-        ; sramcellx2): below this cell, said once for the cell and pin.
+        ; CURRENT: the cell is only inside bundles here (bitcell in
+        ; bitcellx2): below this cell, said once for the cell and pin.
         when(and(n==0 !flBottomMode flCellPlacements(car(occ) car(match)))
             foreach(rec flChildList(car(occ))
                 when(
@@ -3322,7 +3337,7 @@ procedure(flMarkPinByCell(occ name instName pinName hs @optional noUp)
 
         when(n==0
             ; BOTTOM: the cell chosen by labels may hold only some of the
-            ; endpoints (sramx16_unit1 in a_sramx16): try the saved cell.
+            ; endpoints (arr_unit1 in blk_arr): try the saved cell.
             unless(noUp
                 foreach(o flSourceOccsOf(occ)
                     r=flMarkPinByCell(o name instName pinName hs t)
@@ -3757,7 +3772,7 @@ procedure(flMatchAllowed(cv parentScopes)
 
 ; Layout masters (from `masters`) named like schematic cell `cell`.
 ; Return (masters kind): kind "name" (same name) or "variant"
-; (crc_gen_xxx / xxx_crc_gen, outermost ones only). Variants are tried only
+; (blk_gen_xxx / xxx_blk_gen, outermost ones only). Variants are tried only
 ; when `variants` is t (block cells) and no master has the same name.
 procedure(flCellNameMatch(cell masters variants)
     prog((exact vars outer nested n cn)
@@ -3792,7 +3807,7 @@ procedure(flCellNameMatch(cell masters variants)
         )
 
         ; A variant placed inside another variant is a part of it
-        ; (crc_gen_u01 inside temp_crc_gen): keep the outer ones.
+        ; (blk_gen_u01 inside temp_blk_gen): keep the outer ones.
         foreach(m vars
             nested=nil
 
@@ -3830,8 +3845,8 @@ procedure(flVariantNote(cell match)
 )
 
 ; Layout masters that correspond to block schematic `child`.
-; Return (scopes match): match is "name", "variant" (crc_gen_xxx,
-; xxx_crc_gen) or the label share (0..1). Cached per block and parent.
+; Return (scopes match): match is "name", "variant" (blk_gen_xxx,
+; xxx_blk_gen) or the label share (0..1). Cached per block and parent.
 procedure(flMatchBlocks(child parentScopes)
     prog((cached result)
         unless(boundp('flMatchCache) && tablep(flMatchCache)
@@ -3992,7 +4007,7 @@ procedure(flBlockMatch(child scopes labeled depth)
 ; endpoint labels), or the layout masters of this block schematic.
 ; An endpoint whose instance has no label in the layout is followed into
 ; its schematic; that block is used only when its layout is found.
-; A block endpoint at the saved level (crc_gen, crc_reg) is followed
+; A block endpoint at the saved level (blk_gen, blk_reg) is followed
 ; whether or not its instance-name label is in the layout: block labels
 ; are not used. Labeled ones need their layout by cell name ("name" or
 ; "suffix"); labeled cells deeper down stay as before (standard cells).
@@ -4120,7 +4135,7 @@ procedure(flExpandGroups(netName schCv pairs instMap path depth scopes score
                     )
 
                     ; Not a block (a cell made of devices only, e.g.
-                    ; sramcell): when its layout is not entered, keep the
+                    ; bitcell): when its layout is not entered, keep the
                     ; endpoint here; its pin is then found by cell name.
                     when(
                         and(
@@ -4238,7 +4253,7 @@ procedure(flSubScopeP(cv)
 
 ; Layout masters that may be the cell of an instance target.
 ; cellInfo is (cellName isBlock). Same cell name first; for a block also
-; "<cell>_<suffix>" (crc_gen -> crc_gen_temp).
+; "<cell>_<suffix>" (blk_gen -> blk_gen_temp).
 procedure(flCellMatches(cellInfo)
     prog((match)
         match=flCellNameMatch(car(cellInfo) flMasters cadr(cellInfo))
@@ -4332,7 +4347,7 @@ procedure(flMarkGuide(hs bb)
 ; the CIW shows Name, Library and Cell. BOTTOM: placements below the edit cell
 ; get a box + X. Return the number of hits.
 ; Layout master `master` is a bundle of one of the target cells: named
-; <cell>_x<N> (a_saio_x2) or <cell>x<N> (sramcellx2) and holding that
+; <cell>_x<N> (unit_io_x2) or <cell>x<N> (bitcellx2) and holding that
 ; cell directly. Returns the target master, or nil.
 procedure(flBundleOf(master cells)
     prog((name found prefix rest)
@@ -4488,7 +4503,7 @@ procedure(flFindCellTarget(cv name cellInfo hs occurrences)
         when(flBottomMode
             foreach(occ occurrences
                 when(nth(3 occ)>0
-                    ; Inside a bundle (a_saio_x2): plain box per unit and
+                    ; Inside a bundle (unit_io_x2): plain box per unit and
                     ; one guide line per bundle.
                     held=flBundleOf(car(occ) cells)
                     ball=nil
@@ -4877,8 +4892,8 @@ procedure(flSearchLayout(cv)
                         gScore=nth(5 g)
                         gInner=nth(6 g)
 
-                        ; Inner name of the net in this block (csm_CRCRD
-                        ; outside, CRCRD inside); nil when it is the same.
+                        ; Inner name of the net in this block (top_SIGRD
+                        ; outside, SIGRD inside); nil when it is the same.
                         when(gInner==name gInner=nil)
 
                         ; Saved cell's own endpoints, net label found there.
@@ -5264,8 +5279,8 @@ procedure(flMarkFound(name)
 
 ; ---- netcon: two nets with different names shorted by a cell ----
 ; Nets connected to `name` through netcon instances in cv. Each member of
-; an iterated netcon (IRX144_2<127:0>) joins the same bit position of its
-; two terminals' nets: OUT TMBIT<0> <-> IN ICAMTMBIT<2>.
+; an iterated netcon (IX1<127:0>) joins the same bit position of its
+; two terminals' nets: OUT BUSA<0> <-> IN IBUSB<2>.
 ; Rule for a cell: nil (not a netcon cell), t (any terminal pair) or the
 ; two terminal names that are passed through.
 procedure(flNetconRule(cellName)
@@ -5397,9 +5412,9 @@ procedure(flNetconPartners(cv name)
 ; ---- L2S connectivity trace ----
 ; From a found net, follow the same signal under other names:
 ;   netcon / wire_couple   same cell (both modes)
-;   DOWN  into a block cell by pin bit position (BOTTOM): iCAMTMBIT<6> ->
-;         Imain1 pin CAMTMBIT<255:0> bit 6 -> CAMTMBIT<6> inside, and on
-;         through the block instance that holds that bit (a_saiox8 #0).
+;   DOWN  into a block cell by pin bit position (BOTTOM): iBUSB<6> ->
+;         Imain1 pin BUSB<255:0> bit 6 -> BUSB<6> inside, and on
+;         through the block instance that holds that bit (unit_iox8 #0).
 ;   UP    from a pin of the cell to the parent net (BOTTOM, only when the
 ;         cell was entered by descend; flTraceUpLevels levels).
 ; Every net is probed once in the target's color; at most flTraceMaxNets.
@@ -5711,7 +5726,7 @@ procedure(flTraceNet(cv path name ownerBBox win index)
 )
 
 ; True when schematic cell `cell` is the cell of the saved layout labels
-; (same name, or the layout name is a variant: temp_crc_gen, crc_gen_u1).
+; (same name, or the layout name is a variant: temp_blk_gen, blk_gen_u1).
 procedure(flLaySourceP(cell)
     prog((src n m)
         src=flLaySourceCell
@@ -5761,6 +5776,90 @@ procedure(flHasLaySource(cv stack)
 
         flLaySourceTable[key]=if(result then 'yes else 'no)
         return(result)
+    )
+)
+
+; Schematic cells at or below cv, each cell checked once, that hold a net
+; named `name`. Return (names count stopped): at most flHintMax names.
+procedure(flNetHint(cv name)
+    prog((seen stack c key child r names count stopped)
+        seen=makeTable('flHintSeen nil)
+        stack=list(cv)
+        count=0
+
+        while(stack && !stopped
+            c=car(stack)
+            stack=cdr(stack)
+
+            foreach(inst c~>instances
+                when(
+                    and(
+                        !stopped
+                        inst~>objType=="inst"
+                        !flPinSymbolP(inst)
+                    )
+
+                    key=strcat(inst~>libName "/" inst~>cellName)
+
+                    unless(seen[key]
+                        seen[key]=t
+
+                        if(flSoftTimeUp() then
+                            stopped=t
+                        else
+                            child=car(errset(flChildSchematic(inst) nil))
+
+                            when(child && child!=c
+                                r=errset(dbFindSigByName(child name) nil)
+
+                                when(r && car(r)
+                                    count=count+1
+
+                                    when(count<=flHintMax
+                                        names=cons(child~>cellName names)
+                                    )
+                                )
+
+                                stack=cons(child stack)
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        return(list(reverse(names) count stopped))
+    )
+)
+
+; CIW text for flNetHint: " - net X is in schematic a, b, +2 more".
+procedure(flNetHintText(name hint)
+    prog((text)
+        cond(
+            (car(hint)
+                text=sprintf(nil " - net %s is in schematic %s%s"
+                    name
+                    flNameListText(car(hint))
+                    if(cadr(hint)>length(car(hint)) then
+                        sprintf(nil ", +%d more" cadr(hint)-length(car(hint)))
+                    else
+                        ""
+                    )
+                )
+            )
+            (caddr(hint)
+                text=""
+            )
+            (t
+                text=sprintf(nil " - no schematic below has a net %s" name)
+            )
+        )
+
+        when(caddr(hint)
+            text=strcat(text " (hint search stopped at the time limit)")
+        )
+
+        return(text)
     )
 )
 
@@ -6229,7 +6328,7 @@ procedure(flRun(cv direction)
           flCellSelects flCellTargets flBlockSkips
           flDisplayPath flTraceSeen flTraceCount flTraceLimited flProbeSeen
           flTopFound flSkipNames flCellBelow flSourceMasters flLayRestrict
-          allTargets flLaySourceTable
+          allTargets flLaySourceTable flLayMismatch timeWas hint
           flStartTime flTimeTicks flLastElapsed flTimeStopped flHardStopped
           flReachTable flMatchCache flGroupMemo flCellSelected flBoxSeen
           flProbeOrder
@@ -6353,6 +6452,39 @@ procedure(flRun(cv direction)
                     cv path nil 0 nil win
                 )
 
+                ; The saved layout cell's schematic is below here but has
+                ; no such net: the label does not match the schematic. Said
+                ; at once (with a hint); no slow search of every cell.
+                when(
+                    and(
+                        flLayRestrict
+                        !flTimeStopped
+                        car(errset(flHasLaySource(cv nil) nil))
+                    )
+
+                    flLayRestrict=nil
+
+                    foreach(name flLayTargets
+                        unless(member(name flFoundNames)
+                            flLayMismatch=cons(name flLayMismatch)
+                            timeWas=flTimeStopped
+                            hint=flNetHint(cv name)
+
+                            ; The hint search may reach the time limit; that
+                            ; is not a search failure.
+                            flTimeStopped=timeWas
+
+                            flZeroTargets=flZeroTargets+1
+
+                            flSoftAlert(sprintf(nil
+                                "[L2S] %s: not a net in schematic %s (label saved in %s layout) - check the label%s"
+                                name flLaySourceCell flLaySourceCell
+                                flNetHintText(name hint)
+                            ))
+                        )
+                    )
+                )
+
                 ; That cell is not below here: search every cell by name.
                 when(flLayRestrict
                     flLayRestrict=nil
@@ -6445,7 +6577,7 @@ procedure(flRun(cv direction)
 
         when(r && direction=='L2S
             foreach(name flLayTargets
-                unless(member(name flFoundNames)
+                unless(member(name flFoundNames) || member(name flLayMismatch)
                     flZeroTargets=flZeroTargets+1
 
                     flSoftAlert(sprintf(nil
